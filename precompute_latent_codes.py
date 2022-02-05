@@ -1,3 +1,4 @@
+import time
 import math
 import numpy as np
 import cv2
@@ -100,28 +101,23 @@ latent_encoder_transforms = transforms.Compose([
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]
 )
 
-import time
 
-tic = time.time()
+all_codes = []
+
 for i, path_batch in enumerate(img_paths):
-    path_batch = ['c.jpg']
-    if i % 10:
+    if i % 25 == 0:
         print(i)
     batch = read_img_batch(path_batch, latent_encoder_transforms)
     batch = batch.to(device).float()
-    print(batch)
-    #print(latent_encoder)
     codes = latent_encoder(batch)
-    print(codes)
     codes = codes + latent_avg.repeat(codes.shape[0], 1, 1)
-    print(codes)
-    imgs, _ = stylegan([codes], input_is_latent=True, randomize_noise=False)
-    imgs = face_pool(imgs)
-    print(imgs[0])
-    imsave('b.jpg', from_torch(unnormalize(imgs[0])))
-    exit()
-    #img = imgs[0]
-    #print(img.shape)
-    #exit()
-toc = time.time()
-print(toc - tic)
+    all_codes.extend([c for c in codes.cpu().detach()])
+
+    # Uncomment to verify w/ reconstruction
+    #imgs, _ = stylegan([codes], input_is_latent=True, randomize_noise=False)
+    #imgs = face_pool(imgs)
+
+    #imsave('a.jpg', imread(path_batch[0]))
+    #imsave('b.jpg', from_torch(unnormalize(imgs[0])))
+
+torch.save(torch.stack(all_codes), f'{data_dir}/codes.pt')
