@@ -1,12 +1,14 @@
+import sys
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import Linear, Conv2d, BatchNorm2d, PReLU, Sequential, Module
 
-from models.encoders.helpers import get_blocks, Flatten, bottleneck_IR, bottleneck_IR_SE
-from models.stylegan2.model import EqualLinear
-
+from .helpers import get_blocks, Flatten, bottleneck_IR, bottleneck_IR_SE
+sys.path.append('../')
+from stylegan2.model import EqualLinear
 
 class GradualStyleBlock(Module):
     def __init__(self, in_c, out_c, spatial):
@@ -37,12 +39,13 @@ class GradualStyleEncoder(Module):
         super(GradualStyleEncoder, self).__init__()
         assert num_layers in [50, 100, 152], 'num_layers should be 50,100, or 152'
         assert mode in ['ir', 'ir_se'], 'mode should be ir or ir_se'
+        assert opts, 'opts cannot be None'
         blocks = get_blocks(num_layers)
         if mode == 'ir':
             unit_module = bottleneck_IR
         elif mode == 'ir_se':
             unit_module = bottleneck_IR_SE
-        self.input_layer = Sequential(Conv2d(opts.input_nc, 64, (3, 3), 1, 1, bias=False),
+        self.input_layer = Sequential(Conv2d(opts['input_nc'], 64, (3, 3), 1, 1, bias=False),
                                       BatchNorm2d(64),
                                       PReLU(64))
         modules = []
@@ -54,7 +57,7 @@ class GradualStyleEncoder(Module):
         self.body = Sequential(*modules)
 
         self.styles = nn.ModuleList()
-        self.style_count = opts.n_styles
+        self.style_count = opts['n_styles']
         self.coarse_ind = 3
         self.middle_ind = 7
         for i in range(self.style_count):
@@ -112,9 +115,9 @@ class GradualStyleEncoder(Module):
         for j in range(self.middle_ind, self.style_count):
             latents.append(self.styles[j](p1))
 
-        print(c3.shape)
-        print(p2.shape)
-        print(p1.shape)
+        #print(c3.shape)
+        #print(p2.shape)
+        #print(p1.shape)
 
         out = torch.stack(latents, dim=1)
         return out
@@ -131,7 +134,7 @@ class BackboneEncoderUsingLastLayerIntoW(Module):
             unit_module = bottleneck_IR
         elif mode == 'ir_se':
             unit_module = bottleneck_IR_SE
-        self.input_layer = Sequential(Conv2d(opts.input_nc, 64, (3, 3), 1, 1, bias=False),
+        self.input_layer = Sequential(Conv2d(opts['input_nc'], 64, (3, 3), 1, 1, bias=False),
                                       BatchNorm2d(64),
                                       PReLU(64))
         self.output_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
@@ -164,8 +167,8 @@ class BackboneEncoderUsingLastLayerIntoWPlus(Module):
             unit_module = bottleneck_IR
         elif mode == 'ir_se':
             unit_module = bottleneck_IR_SE
-        self.n_styles = opts.n_styles
-        self.input_layer = Sequential(Conv2d(opts.input_nc, 64, (3, 3), 1, 1, bias=False),
+        self.n_styles = opts['n_styles']
+        self.input_layer = Sequential(Conv2d(opts['input_nc'], 64, (3, 3), 1, 1, bias=False),
                                       BatchNorm2d(64),
                                       PReLU(64))
         self.output_layer_2 = Sequential(BatchNorm2d(512),

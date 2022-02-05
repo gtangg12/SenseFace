@@ -16,7 +16,7 @@ def to_torch(img):
     return torch.unsqueeze(torch.tensor(img), dim=0) / 255.
 
 def from_torch(img):
-    return (torch.squeeze(img).detach().cpu().numpy() * 255).astype(np.uint8)
+    return (torch.squeeze(img).cpu().detach().numpy() * 255).astype(np.uint8)
 
 
 def sobel(img):
