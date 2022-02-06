@@ -143,9 +143,6 @@ class LanguageFeatureModulation(nn.Module):
 """
     Actual Inference Model
 """
-latent_mask = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-alpha = 0.35
-
 class FaceGenerator(nn.Module):
     def __init__(self):
         super(FaceGenerator, self).__init__()
@@ -165,15 +162,6 @@ class FaceGenerator(nn.Module):
         images, _ = self.decoder([styles + latent_avg], input_is_latent=True, randomize_noise=False)
         images = self.pooling(images)
         return images, styles
-
-    def mix_codes(codes, codes_other):
-        codes_other = torch.from_numpy(codes_other).unsqueeze(0).cuda()
-        _, latent_to_inject = self.decoder(codes_other,
-                                           input_code=True,
-                                           return_latents=True)
-        for i in latent_mask:
-            codes[:, i, :] = (1 - alpha) * codes[:, i, :] + alpha * latent_to_inject[:, i, :]
-        return codes
 
     def prepare_fine_tune(self):
         self.fine_tune = true

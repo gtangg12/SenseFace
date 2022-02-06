@@ -9,6 +9,8 @@ from model import FaceGenerator
 from model import stylegan, face_pool, latent_avg
 from precompute_latent_codes import imread, imsave, to_torch, from_torch, unnormalize, generate_codes
 from train import read_caption, encode_texts
+
+
 '''
 def knn(database, queries, k=5):
     """ Return top 5 nearest neighbors for each embedding query from database
@@ -32,19 +34,49 @@ facegen = FaceGenerator()
 #facegen = torch.load('[insert path]')
 facegen.to(device)
 
-def generate_augmentations(codes, word_embeddings, n_outputs_to_generate=128):
-    output = []
-    to_inject = np.random.randn(n_outputs_to_generate, 512).astype('float32')
-    for codes_other in to_inject:
-        codes_fused = facegen.mix_codes(codes, codes_other)
-        images, _ = facegen(codes_fused)
-        output.extend([x for x in images])
-    return output
+
+latent_mask = [1, 2, 3, 4, 11, 12, 13, 14, 15, 16, 17]
+alpha = 1
+
+def generate_augmentations(codes, word_embeddings, n_outputs_to_generate=16):
+    _, codes = facegen(word_embeddings, codes - latent_avg)
+    codes = codes + latent_avg
+
+    outputs = []
+    to_inject = np.random.randn(n_outputs_to_generate, 512).astype('float32') # standard normal
+    for latent in to_inject:
+        # go from w latent vector to w+ styles
+        latent = torch.from_numpy(latent).unsqueeze(0).to(device)
+        _, codes_other = stylegan([latent], input_is_latent=False, return_latents=True)
+        # mix styles
+        codes_fused = torch.clone(codes)
+        for i in latent_mask:
+            codes_fused[:, i, :] = codes[:, i, :] + alpha * codes_other[:, i, :]
+        # gen images
+        codes_fused = codes_fused.detach()
+        images, _ = stylegan([codes_fused], input_is_latent=True, randomize_noise=False)
+        images = face_pool(images)
+        outputs.extend([x for x in images])
+    return outputs
 
 
 demo_name = '585'
 
 if __name__ == '__main__':
+    torch.cuda.empty_cache()
+
+    '''
+    codes = torch.load('perturbed_443_glasses.pth').detach().to(device).float()
+    codes = torch.unsqueeze(codes, dim=0)
+
+    print(codes.shape)
+
+    imgs, _ = stylegan([codes], input_is_latent=True, randomize_noise=False)
+    imgs = face_pool(imgs)
+    imsave(f'tmp.jpg', from_torch(unnormalize(imgs[0])))
+    exit()
+    '''
+
     sketch_encoder = load_ckpt('pretrained_models/psp_celebs_sketch_to_face.pt')
     print("Sketch Encoder Loaded")
 
@@ -60,10 +92,18 @@ if __name__ == '__main__':
     caption = read_caption(f'demo/{demo_name}_caption.txt')
     word_embeddings = encode_texts([caption]).to(device)
 
-    imgs, _ = facegen(word_embeddings, sketch_codes - latent_avg)
-    imsave(f'demo/{demo_name}_synth_text.jpg', from_torch(unnormalize(imgs[0])))
+
+    outputs = generate_augmentations(sketch_codes, word_embeddings)
+    for i, img in enumerate(outputs):
+        imsave(f'demo/{demo_name}_augment/{i}.jpg', from_torch(unnormalize(img)))
 
     '''
+    imgs, _ = facegen(word_embeddings, sketch_codes - latent_avg)
+    imsave(f'demo/{demo_name}_synth_text.jpg', from_torch(unnormalize(imgs[0])))
+    '''
+
+    '''
+    print(sketch_codes.shape)
     imgs, _ = stylegan([sketch_codes], input_is_latent=True, randomize_noise=False)
     imgs = face_pool(imgs)
     imsave(f'demo/{demo_name}_synth_base.jpg', from_torch(unnormalize(imgs[0])))
