@@ -6,10 +6,8 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from psp_encoders.encoders import GradualStyleEncoder
-
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = torch.device(device)
+from model import device
+from model import load_ckpt, stylegan, face_pool, latent_avg
 
 
 imread = lambda x : cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB)
@@ -24,16 +22,12 @@ def from_torch(img):
 def unnormalize(img):
     return torch.clamp((img + 1) / 2, 0, 1)
 
-
-def get_keys(ckpt, name):
-    if 'state_dict' in ckpt:
-        ckpt = ckpt['state_dict']
-    return {k[len(name) + 1:]: v for k, v in ckpt.items() if k[:len(name)] == name}
-
+def read_ids():
+    with open(f'{data_dir}/datapoints.txt') as fin:
+        return [id.strip('\n') for id in fin.readlines()]
 
 def read_filepaths(dir, extension):
-    with open(f'{data_dir}/datapoints.txt') as fin:
-        ids = [id.strip('\n') for id in fin.readlines()]
+    ids = read_ids()
     return [f'{data_dir}/{dir}/{id}.{extension}' for id in ids]
 
 
@@ -57,40 +51,10 @@ def read_img_batch(path_batch, transforms):
 
 data_dir = 'data/CelebAText-HQ'
 
-"""
-    StyleGAN used for debugging (comment out when done)
-"""
-from stylegan2.model import Generator
-
-ckpt = torch.load('pretrained_models/stylegan2-ffhq-config-f.pt')
-
-latent_avg = ckpt['latent_avg'].to(device)
-
-stylegan = Generator(size=1024, style_dim=512, n_mlp=8)
-stylegan.load_state_dict(ckpt['g_ema'])
-stylegan.to(device)
-stylegan.eval()
-
-face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
-
-print("StyleGAN Loaded")
 
 """
     Precompute w+ styles
 """
-def load_ckpt(path):
-    ckpt = torch.load(path)
-    ckpt['opts']['output_size'] = 1024
-    ckpt['opts']['n_styles'] = int(math.log(ckpt['opts']['output_size'], 2)) * 2 - 2
-
-    model = GradualStyleEncoder(50, 'ir_se', ckpt['opts'])
-    model.load_state_dict(get_keys(ckpt, 'encoder'))
-    model.to(device)
-    model.eval()
-
-    return model
-
-
 def generate_codes(paths, encoder, encoder_transforms, grayscale=False):
     paths_batched = batch_arrlist(paths, batch_len=8)
     all_codes = []
@@ -116,29 +80,30 @@ def generate_codes(paths, encoder, encoder_transforms, grayscale=False):
     return torch.stack(all_codes)
 
 
-'''
-img_encoder = load_ckpt('pretrained_models/psp_ffhq_encode.pt')
-print("Image Encoder Loaded")
+if __name__ == '__main__':
+    '''
+    img_encoder = load_ckpt('pretrained_models/psp_ffhq_encode.pt')
+    print("Image Encoder Loaded")
 
-img_encoder_transforms = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-])
+    img_encoder_transforms = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+    ])
 
-img_paths = read_filepaths('images', 'jpg')
-img_codes = generate_codes(img_paths, img_encoder, img_encoder_transforms)
-torch.save(img_codes, f'{data_dir}/img_codes.pt')
-'''
+    img_paths = read_filepaths('images', 'jpg')
+    img_codes = generate_codes(img_paths, img_encoder, img_encoder_transforms)
+    torch.save(img_codes, f'{data_dir}/img_codes.pt')
+    '''
 
-img_codes = torch.load(f'{data_dir}/img_codes.pt')
+    img_codes = torch.load(f'{data_dir}/img_codes.pt')
 
-sketch_encoder = load_ckpt('pretrained_models/psp_celebs_sketch_to_face.pt')
-print("Sketch Encoder Loaded")
+    sketch_encoder = load_ckpt('pretrained_models/psp_celebs_sketch_to_face.pt')
+    print("Sketch Encoder Loaded")
 
-sketch_encoder_transforms = transforms.Compose([
-    transforms.Resize((256, 256))
-])
+    sketch_encoder_transforms = transforms.Compose([
+        transforms.Resize((256, 256))
+    ])
 
-sketch_paths = read_filepaths('sketches', 'jpg')
-sketch_codes = generate_codes(sketch_paths, sketch_encoder, sketch_encoder_transforms, grayscale=True)
-torch.save(sketch_codes, f'{data_dir}/sketch_codes.pt')
+    sketch_paths = read_filepaths('sketches', 'jpg')
+    sketch_codes = generate_codes(sketch_paths, sketch_encoder, sketch_encoder_transforms, grayscale=True)
+    torch.save(sketch_codes, f'{data_dir}/sketch_codes.pt')
