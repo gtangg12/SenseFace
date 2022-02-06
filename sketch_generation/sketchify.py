@@ -43,6 +43,7 @@ def simplify(sketch):
 data_dir = '../data/CelebAText-HQ'
 ids, paths = [], []
 
+'''
 with open(f'{data_dir}/datapoints.txt') as fin:
     for id in fin.readlines():
         id = id.strip('\n')
@@ -50,7 +51,9 @@ with open(f'{data_dir}/datapoints.txt') as fin:
         paths.append(f'{data_dir}/images/{id}.jpg')
 
 print("Done reading data.")
-
+'''
+paths = ['../demo/585.jpg']
+ids = [1]
 
 batch_len = 8
 
@@ -71,4 +74,5 @@ for i in range(0, len(ids), batch_len):
     sketches = list(map(from_torch, sketches))
 
     for j, sketch in enumerate(sketches):
-        cv2.imwrite(f'{data_dir}/sketches/{ids[i + j]}.jpg', sketch)
+        #cv2.imwrite(f'{data_dir}/sketches/{ids[i + j]}.jpg', sketch)
+        cv2.imwrite(f'../demo/585_sketch.jpg', sketch)

@@ -58,7 +58,8 @@ class LFMDataset():
                self.ref_codes[idx].to(device)
 
 
-def train(model,
+def train(name,
+          model,
           train_loader,
           validation_loader,
           criterion,
@@ -117,16 +118,9 @@ def train(model,
 
         print(f'Epoch: {epoch}, Train Loss: {train_loss}, Val Loss: {validation_loss}')
         if (epoch + 1) % checkpoint_interval == 0:
-            torch.save(model, f'checkpoints/classifier_{(epoch + 1):03d}.pt')
+            torch.save(model, f'checkpoints/{name}_{(epoch + 1):03d}.pt')
 
     return train_losses, validation_losses
-
-
-def latent_loss(latents, y):
-    loss = torch.tensor(0.0).to(device)
-    for i in range(styles_cnt):
-        loss += torch.sum(torch.square(latents[:, i, :] - y[:, i, :]))
-    return loss
 
 
 def main():
@@ -144,15 +138,18 @@ def main():
         DataLoader(train_dataset, batch_size=32, shuffle=True), \
         DataLoader(validation_dataset, batch_size=32, shuffle=True)
 
+
     model = LanguageFeatureModulation(out_d = 512)
+    #model = torch.load('checkpoints/classifier_015.pt')
     model = nn.DataParallel(model, device_ids=[0])
     model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     loss_func = nn.MSELoss()
 
-    losses = train(model,
+    losses = train('lfm',
+                   model,
                    train_loader,
                    validation_loader,
                    loss_func,

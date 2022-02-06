@@ -1,8 +1,9 @@
+import math
 import numpy as np
 import torch
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
-
+from psp_encoders.encoders import GradualStyleEncoder
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device = torch.device(device)
@@ -37,20 +38,21 @@ def load_ckpt(path):
 """
     StyleGAN2
 """
-from stylegan2.model import Generator
+if torch.cuda.is_available():
+    from stylegan2.model import Generator
 
-ckpt = torch.load('pretrained_models/stylegan2-ffhq-config-f.pt')
+    ckpt = torch.load('pretrained_models/stylegan2-ffhq-config-f.pt')
 
-latent_avg = ckpt['latent_avg'].to(device)
+    latent_avg = ckpt['latent_avg'].to(device)
 
-stylegan = Generator(size=1024, style_dim=512, n_mlp=8)
-stylegan.load_state_dict(ckpt['g_ema'])
-stylegan.to(device)
-stylegan.eval()
+    stylegan = Generator(size=1024, style_dim=512, n_mlp=8)
+    stylegan.load_state_dict(ckpt['g_ema'])
+    stylegan.to(device)
+    stylegan.eval()
 
-face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
+    face_pool = torch.nn.AdaptiveAvgPool2d((256, 256))
 
-print("StyleGAN Loaded")
+    print("StyleGAN Loaded")
 
 
 """
@@ -60,17 +62,18 @@ class FuseBlock(nn.Module):
     def __init__(self, num_layers, in_d, out_d):
         super(FuseBlock, self).__init__()
         modules = []
-        modules += [nn.Linear(in_d, in_d), nn.ReLU(), nn.Linear(in_d, out_d)]
-        for i in range((num_layers - 1) // 2):
+        modules += [nn.Linear(in_d, out_d)]
+        for i in range(num_layers):
             modules += [
                 nn.BatchNorm1d(out_d),
                 nn.ReLU(),
-                nn.Linear(out_d, out_d),
-                nn.BatchNorm1d(out_d),
-                nn.Dropout(),
-                nn.ReLU(),
-                nn.Linear(out_d, out_d),
+                nn.Linear(out_d, out_d)
             ]
+        modules += [
+            nn.BatchNorm1d(out_d),
+            nn.Dropout(),
+            nn.Linear(out_d, out_d)
+        ]
         self.fuse = nn.Sequential(*modules)
 
     def forward(self, x1, x2):
@@ -89,7 +92,7 @@ class LanguageFeatureModulation(nn.Module):
 
         # WARNING: torch 1.7.1 has batch_first by default unlike later versions
         lang_encoder_layer = \
-            nn.TransformerEncoderLayer(d_model=512, nhead=8)
+            nn.TransformerEncoderLayer(d_model=512, nhead=4)
         self.lang_encoder = \
             nn.TransformerEncoder(lang_encoder_layer, num_layers=8)
 
@@ -104,16 +107,12 @@ class LanguageFeatureModulation(nn.Module):
             modules += [FuseBlock(4, lang_encoder_dim + out_d, out_d)]
         self.styles = nn.Sequential(*modules)
 
+        '''
         self.affine = nn.ModuleList()
         for i in range(styles_cnt):
-            module = nn.Sequential(nn.Linear(out_d, out_d),
-                                   nn.BatchNorm1d(out_d),
-                                   nn.Linear(out_d, out_d),
-                                   nn.BatchNorm1d(out_d),
-                                   nn.Dropout(),
-                                   nn.Linear(out_d, out_d))
+            module = nn.Sequential(nn.Linear(out_d, out_d))
             self.affine.append(module)
-
+        '''
 
     def forward(self, word_embeddings, codes):
         lang_hidden = self.lang_encoder(word_embeddings)
@@ -123,7 +122,7 @@ class LanguageFeatureModulation(nn.Module):
         latents = []
         for i in range(styles_cnt):
             style = self.styles[i](lang_codes[:, i, :], codes[:, i, :])
-            style = self.affine[i](style)
+            #style = self.affine[i](style)
             latents.append(style)
         latents = torch.stack(latents, dim=1)
         return latents
@@ -144,26 +143,37 @@ class LanguageFeatureModulation(nn.Module):
 """
     Actual Inference Model
 """
-class FaceGenerator:
+latent_mask = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+alpha = 0.35
+
+class FaceGenerator(nn.Module):
     def __init__(self):
         super(FaceGenerator, self).__init__()
         self.encoder = load_ckpt('pretrained_models/psp_celebs_sketch_to_face.pt')
-        self.decoder = nn.Sequential(stylegan, face_pool)
-        self.lang_fm = LanguageFeatureModulation(out_d = 512)
+        self.decoder = stylegan
+        self.pooling = face_pool
+        self.lang_fm = torch.load('checkpoints/lfm_010.pt')
+
+        self.affine = nn.ModuleList()
+        for i in range(styles_cnt):
+            self.affine.append(nn.Linear(512, 512))
 
     def forward(self, word_embeddings, codes):
-        assert self.fine_tune, 'Model not in fine tune mode'
-        return run(word_embeddings, codes)
-
-    def infer(self, word_embeddings, sketch):
-        codes = self.encoder(sketch)
-        return run(word_embeddings, codes)
-
-    def run(word_embeddings, codes):
         styles = self.lang_fm(word_embeddings, codes)
-        styles = styles + latent_avg
-        images, _ = self.decoder([styles])
+        #for i in range(styles_cnt):
+        #    styles[:, i, :] = self.affine[i](styles[:, i, :])
+        images, _ = self.decoder([styles + latent_avg], input_is_latent=True, randomize_noise=False)
+        images = self.pooling(images)
         return images, styles
+
+    def mix_codes(codes, codes_other):
+        codes_other = torch.from_numpy(codes_other).unsqueeze(0).cuda()
+        _, latent_to_inject = self.decoder(codes_other,
+                                           input_code=True,
+                                           return_latents=True)
+        for i in latent_mask:
+            codes[:, i, :] = (1 - alpha) * codes[:, i, :] + alpha * latent_to_inject[:, i, :]
+        return codes
 
     def prepare_fine_tune(self):
         self.fine_tune = true
